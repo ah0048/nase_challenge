@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive 3D Elliptical Orbits with Three.js</title>
+    <title>Interactive 3D Elliptical Orbits with Three.js (including NEOs and PHAs)</title>
     <style>
         body { margin: 0; }
         canvas { display: block; }
@@ -23,7 +23,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    // Scene, Camera, and Renderer
+    // Scene, Camera, and Renderer setup
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer();
@@ -42,74 +42,100 @@
     camera.position.set(0, 20, 50);
     controls.update();
 
-    // List of planets to fetch (added Jupiter, Saturn, Uranus, and Neptune)
-    const planetNames = ['mercure', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
-    const planetsData = {};  // Dictionary to store planet data
-    const planetObjects = {}; // Dictionary to store planet meshes
+    // List of planets and small bodies
+    const planetNames = ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
+    const planetsData = {};
+    const planetObjects = {};
 
-    // Colors and sizes for planets (approximate scale relative to the sun)
-    const scaleFactor = 10; // Adjust this factor to increase the size of the planets
+    // Colors for NEOs and PHAs
+    const neoColor = 0xffa500;  // Light orange for NEOs
+    const phaColor = 0xff0000;  // Red for PHAs
+    // Colors and sizes for planets
+    const scaleFactor = 10;
     const planetProperties = {
-        'mercure': { color: 0x8c7c6c, size: 0.0035 * scaleFactor },
+        'mercury': { color: 0x8c7c6c, size: 0.0035 * scaleFactor },
         'venus': { color: 0xffd085, size: 0.0087 * scaleFactor },
         'earth': { color: 0x4b9bd7, size: 0.0092 * scaleFactor },
         'mars': { color: 0xd48f8a, size: 0.0049 * scaleFactor },
-        'jupiter': { color: 0xc2b280, size: 0.1008 * scaleFactor }, // Jupiter properties
-        'saturn': { color: 0xe2b21c, size: 0.0837 * scaleFactor },  // Saturn properties
-        'uranus': { color: 0x4bc1d2, size: 0.0364 * scaleFactor },  // Uranus properties
-        'neptune': { color: 0x3e3e9c, size: 0.0354 * scaleFactor }   // Neptune properties
+        'jupiter': { color: 0xc2b280, size: 0.1008 * scaleFactor },
+        'saturn': { color: 0xe2b21c, size: 0.0837 * scaleFactor },
+        'uranus': { color: 0x4bc1d2, size: 0.0364 * scaleFactor },
+        'neptune': { color: 0x3e3e9c, size: 0.0354 * scaleFactor }
     };
 
-    // Create the Sun (only once)
-    const sunGeometry = new THREE.SphereGeometry(0.9, 32, 32);
+    // Create the Sun
+    const sunGeometry = new THREE.SphereGeometry(0.1, 32, 32);
     const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
     const sun = new THREE.Mesh(sunGeometry, sunMaterial);
     scene.add(sun);
 
     // Scale factor for orbits
-    const orbitScale = 0.01; // Reduce this value to make orbits smaller
+    const orbitScale = 0.01;
 
-    // Fetch data for each planet and initialize the orbit
+    // Fetch data for planets
     async function fetchOrbitalParameters(planetName) {
         const response = await fetch(`https://api.le-systeme-solaire.net/rest/bodies/${planetName}`);
         const data = await response.json();
 
         const params = {
-            semiMajorAxis: data.semimajorAxis * orbitScale / 1e6,  // Adjusted scale
+            semiMajorAxis: data.semimajorAxis * orbitScale / 1e6,
             eccentricity: data.eccentricity,
-            orbitalPeriod: data.sideralOrbit, // in days
+            orbitalPeriod: data.sideralOrbit,
             inclination: THREE.MathUtils.degToRad(data.inclination),
             longitudeAscendingNode: THREE.MathUtils.degToRad(data.longAscNode),
             argumentOfPeriapsis: THREE.MathUtils.degToRad(data.argPeriapsis)
         };
         console.log(`${planetName} Parameters:`, params);
         planetsData[planetName] = params;
-        initializeOrbit(planetName, params);
+        initializeOrbit(planetName, params, planetProperties[planetName].color, planetProperties[planetName].size);
     }
 
-    // Fetch data for all planets
-    planetNames.forEach(planet => fetchOrbitalParameters(planet));
+    // Load data for NEOs and PHAs
+    const files = ['neo_data.json', 'pha_data.json'];  // List of JSON file names
 
-    // Function to initialize orbit with real parameters for each planet
-    function initializeOrbit(planetName, params) {
+    async function loadSmallBodies() {
+        for (const file of files) {
+            const response = await fetch(file);
+            const smallBodies = await response.json();
+
+            const isPhaFile = file === 'pha_data.json';
+
+            // Iterate over each small body
+            smallBodies.forEach(body => {
+                const { full_name, a, e, i, om, w, per_y, H } = body;
+                const AU_TO_KM = 149597870.7;
+                const params = {
+                    semiMajorAxis: a * orbitScale * AU_TO_KM / 1e6,
+                    eccentricity: e,
+                    orbitalPeriod: per_y,
+                    inclination: THREE.MathUtils.degToRad(i),
+                    longitudeAscendingNode: THREE.MathUtils.degToRad(om),
+                    argumentOfPeriapsis: THREE.MathUtils.degToRad(w)
+                };
+                console.log(`Small Body: ${full_name}`, params);
+                // Color based on whether the body is from PHA or NEO
+                const color = isPhaFile ? phaColor : neoColor;
+                const size = 0.01 * Math.pow(2, (16.5 - H) / 2.5);
+
+                planetsData[full_name] = params;
+                initializeOrbit(full_name, params, color, size);
+            });
+        }
+    }
+
+    // Initialize orbit
+    function initializeOrbit(name, params, color, size) {
         const { semiMajorAxis: a, eccentricity, inclination, longitudeAscendingNode, argumentOfPeriapsis } = params;
         const b = a * Math.sqrt(1 - eccentricity * eccentricity);
         const c = Math.sqrt(a * a - b * b);
         const numPoints = 1000;
 
-        // Generate points for the elliptical orbit
-        const curve = new THREE.EllipseCurve(
-            -c, 0, a, b, 0, 2 * Math.PI, false, 0
-        );
-
+        const curve = new THREE.EllipseCurve(-c, 0, a, b, 0, 2 * Math.PI, false, 0);
         const points = curve.getPoints(numPoints);
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-        // Create a 3D line from the 2D points
-        const material = new THREE.LineBasicMaterial({ color: planetProperties[planetName].color });
+        const material = new THREE.LineBasicMaterial({ color: color });
         const ellipseObject = new THREE.Line(geometry, material);
 
-        // Apply rotations to the elliptical orbit
         const rotationMatrix = new THREE.Matrix4()
             .makeRotationZ(argumentOfPeriapsis)
             .multiply(new THREE.Matrix4().makeRotationX(inclination))
@@ -118,15 +144,14 @@
 
         scene.add(ellipseObject);
 
-        // Create a planet for each orbit
-        const planetGeometry = new THREE.SphereGeometry(planetProperties[planetName].size, 32, 32);
-        const planetMaterial = new THREE.MeshBasicMaterial({ color: planetProperties[planetName].color });
-        const planet = new THREE.Mesh(planetGeometry, planetMaterial);
-        scene.add(planet);
-        planetObjects[planetName] = planet;
+        const bodyGeometry = new THREE.SphereGeometry(size, 32, 32);
+        const bodyMaterial = new THREE.MeshBasicMaterial({ color: color });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        scene.add(body);
+        planetObjects[name] = body;
     }
 
-    // Function to solve Kepler's equation (M = E - e*sin(E)) using Newton-Raphson method
+    // Kepler equation solver
     function solveKepler(M, e, tolerance = 1e-6) {
         let E = M;
         let delta;
@@ -137,43 +162,34 @@
         return E;
     }
 
-    // Correct orbital rotation application in updatePlanetPosition
-    function updatePlanetPosition(planetName, time) {
-        const params = planetsData[planetName];
+    // Update position
+    function updatePlanetPosition(name, time) {
+        const params = planetsData[name];
         const { semiMajorAxis: a, eccentricity, orbitalPeriod, inclination, longitudeAscendingNode, argumentOfPeriapsis } = params;
-        const planet = planetObjects[planetName];
+        const body = planetObjects[name];
 
-        // Calculate Mean Anomaly
+        // For small bodies without orbital period, calculate it
+        // const period = orbitalPeriod || Math.sqrt(Math.pow(a / orbitScale, 3)) * 365.25;
         const meanAnomaly = (2 * Math.PI / orbitalPeriod) * time;
         const eccentricAnomaly = solveKepler(meanAnomaly, eccentricity);
 
-        // True Anomaly
         const trueAnomaly = 2 * Math.atan2(
             Math.sqrt(1 + eccentricity) * Math.sin(eccentricAnomaly / 2),
             Math.sqrt(1 - eccentricity) * Math.cos(eccentricAnomaly / 2)
         );
 
-        // Distance from the Sun (r)
         const r = a * (1 - eccentricity * eccentricity) / (1 + eccentricity * Math.cos(trueAnomaly));
 
-        // Position in orbital plane (before rotations)
         const x = r * Math.cos(trueAnomaly);
         const y = r * Math.sin(trueAnomaly);
 
         const position = new THREE.Vector3(x, y, 0);
 
-        // Apply correct rotation sequence: 
-        // 1. Longitude of Ascending Node (rotate around z-axis)
         position.applyAxisAngle(new THREE.Vector3(0, 0, 1), longitudeAscendingNode);
-        
-        // 2. Inclination (rotate around x-axis)
         position.applyAxisAngle(new THREE.Vector3(1, 0, 0), inclination);
-        
-        // 3. Argument of Periapsis (rotate around z-axis)
         position.applyAxisAngle(new THREE.Vector3(0, 0, 1), argumentOfPeriapsis);
 
-        // Set the new position of the planet
-        planet.position.copy(position);
+        body.position.copy(position);
     }
 
     // Animation loop
@@ -182,18 +198,23 @@
         requestAnimationFrame(animate);
         controls.update();
 
-        // Update positions for all planets
-        planetNames.forEach(planetName => {
-            updatePlanetPosition(planetName, time * planetsData[planetName].orbitalPeriod / 365);
+        Object.keys(planetsData).forEach(name => {
+            updatePlanetPosition(name, time);
         });
 
-        // Increment time (1 Earth day per frame)
         time += 1;
 
         renderer.render(scene, camera);
     }
 
-    animate();
+    // Fetch data and start animation
+    async function init() {
+        await Promise.all(planetNames.map(fetchOrbitalParameters));
+        await loadSmallBodies();
+        animate();
+    }
+
+    init();
 
     // Handle window resizing
     window.addEventListener('resize', () => {
